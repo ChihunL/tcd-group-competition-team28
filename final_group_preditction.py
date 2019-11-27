@@ -17,41 +17,41 @@ from catboost import CatBoostRegressor
 
 def main():
 
+	# Load training data
     data = pd.read_csv(
         'tcd-ml-1920-group-income-train.csv')
     data.sort_values("Instance", inplace=True)
+    
+    # Remove Duplicate data
     data.drop_duplicates(subset="Instance",
                                      keep=False, inplace=True)
-
+	# Load test data
     test_data = pd.read_csv(
         'tcd-ml-1920-group-income-test.csv')
  
+ 	# Remove Instance 
     data = data.loc[:, [
         'Year of Record', 'Housing Situation', 'Crime Level in the City of Employement', 'Work Experience in Current Job [years]', 'Satisfation with employer', 'Gender', 'Age', 'Country', 'Size of City', 'Profession', 'University Degree', 'Wears Glasses', 'Hair Color', 'Body Height [cm]', 'Yearly Income in addition to Salary (e.g. Rental Income)', 'Total Yearly Income [EUR]', ]]
     test_data = test_data.loc[:, ['Year of Record', 'Housing Situation', 'Crime Level in the City of Employement', 'Work Experience in Current Job [years]', 'Satisfation with employer', 'Gender', 'Age',
                                         'Country', 'Size of City', 'Profession', 'University Degree', 'Wears Glasses', 'Hair Color', 'Body Height [cm]', 'Yearly Income in addition to Salary (e.g. Rental Income)', 'Total Yearly Income [EUR]', ]]
 
+
+	# Parse string data to float
     data = parse_eur(data)
     test_data = parse_eur(test_data)
-
     data['Yearly Income in addition to Salary (e.g. Rental Income)'] = pd.to_numeric(
         data['Yearly Income in addition to Salary (e.g. Rental Income)'], errors='coerce')
     data['Work Experience in Current Job [years]'] = pd.to_numeric(
         data['Work Experience in Current Job [years]'], errors='coerce')
     data = data.replace(np.nan, 0, regex=True)
-
-
-    
     test_data['Yearly Income in addition to Salary (e.g. Rental Income)'] = pd.to_numeric(
         test_data['Yearly Income in addition to Salary (e.g. Rental Income)'], errors='coerce')
     test_data['Work Experience in Current Job [years]'] = pd.to_numeric(
         test_data['Work Experience in Current Job [years]'], errors='coerce')
     test_data = test_data.replace(np.nan, 0, regex=True)
 
-
+	# Process Missing and similar data
     data[["Year of Record"]] = data[["Year of Record"]].fillna(value=int(data["Year of Record"].mean()))
-
-
     test_data[["Year of Record"]] = test_data[["Year of Record"]].fillna(value=int(test_data["Year of Record"].mean()))
 
     data[['Hair Color']] = data[["Hair Color"]].fillna(value="unknownHC")
@@ -108,7 +108,7 @@ def main():
     
     test_data[["Country"]] = test_data[["Country"]].fillna(test_data["Country"].mode()[0])
 
-
+	# Group Data by column
     groupedProf = data.groupby('Profession', as_index=False)['Total Yearly Income [EUR]'].mean()
     data['Profession'] = data['Profession'].map(groupedProf.set_index('Profession')['Total Yearly Income [EUR]'])
 
@@ -146,18 +146,20 @@ def main():
     test_data['Hair Color'] = test_data['Hair Color'].map(groupedHC.set_index('Hair Color')['Total Yearly Income [EUR]'])
 
     
-
+	# log the income	
     y = data['Total Yearly Income [EUR]'].apply(np.log)
+    # Remove income for features
     data = data.drop("Total Yearly Income [EUR]", 1)
     test_data = test_data.drop("Total Yearly Income [EUR]", 1)
-
+ 
+ 	# Pipeline, impute any data that was missed above
+ 	# Use target encoder to encode categorical data
     numeric_transformer = Pipeline(steps=[
         ('imputer', SimpleImputer(strategy='mean')),
         ('scaler', StandardScaler())])
     categorical_transformer = Pipeline(steps=[
         ('imputer', SimpleImputer(strategy='constant', fill_value='missing')),
         ('target', TargetEncoder())])
-
 
     numeric_features = data.select_dtypes(
         include=['int64', 'float64']).columns
@@ -169,8 +171,8 @@ def main():
             ('num', numeric_transformer, numeric_features),
             ('cat', categorical_transformer, categorical_features)])
 
+	# Use Catboost to train model
     reg = Pipeline(steps=[('preprocessor', preprocessor),
-                          #('regressor', RandomForestRegressor(n_estimators=50))])
                           ('regressor', CatBoostRegressor(iterations=3000,
                              learning_rate=0.1,
                              depth=10,
@@ -185,7 +187,9 @@ def main():
     Y = y.values
     X_train, X_test, Y_train, Y_test = train_test_split(
         X, Y, test_size=0.2, random_state=0)
-
+	
+	
+	# ## For local testing
     # reg.fit(X_train, Y_train,
     #         regressor__eval_set=(X_test,Y_test),
     #         regressor__use_best_model=True,
@@ -195,6 +199,7 @@ def main():
     #val_mae = mean_absolute_error(Y_test, pre_test_lgb)
     #print(val_mae)
 
+	
     reg.fit(data, y.values)
     pred_test = reg.predict(test_data)
     pred_test = np.exp(pred_test)
